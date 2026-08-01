@@ -1,9 +1,8 @@
 import streamlit as st
 import google.generativeai as genai
-import re
 
 # ---------------------------------------------------------
-# 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS
+# 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS CORPORATIVOS
 # ---------------------------------------------------------
 st.set_page_config(
     page_title="InmoAI - Generador Profesional de Anuncios",
@@ -54,7 +53,7 @@ if api_key:
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/602/602275.png", width=60)
     st.title("InmoAI Pro")
-    st.caption("v1.4 • Filtro de Salida Limpia")
+    st.caption("v1.5 • Delimitador Secreto Activo")
     st.markdown("---")
     
     if modelos_candidatos:
@@ -80,7 +79,7 @@ st.markdown("""
 tab1, tab2 = st.tabs(["✨ Generador de Anuncios", "ℹ️ Guía & Soporte"])
 
 # ---------------------------------------------------------
-# 5. FORMULARIO Y GENERACIÓN CON FILTRO DE TEXTO
+# 5. FORMULARIO Y GENERACIÓN DE CONTENIDO
 # ---------------------------------------------------------
 with tab1:
     with st.form("formulario_propiedad_completo"):
@@ -157,9 +156,9 @@ with tab1:
             st.warning("⚠️ Debes completar al menos los campos de Dirección y Precio.")
         else:
             prompt_usuario = f"""
-            Escribe directamente los anuncios inmobiliarios en español para esta propiedad:
+            Redacta propuestas de anuncios inmobiliarios profesionales en español.
 
-            DATOS:
+            DATOS DE LA PROPIEDAD:
             - Tipo: {tipo_propiedad}
             - Ubicación: {direccion}
             - Precio: {precio}
@@ -167,13 +166,18 @@ with tab1:
             - Área construida: {area_construida if area_construida else 'No especificada'}
             - Habitaciones: {habitaciones} | Baños: {banos} | Parqueaderos: {parqueaderos}
             - Amenidades: {notas}
-            - Tono: {tono}
+            - Tono comercial: {tono}
             - Canal: {plataforma}
             - Contacto: {cta}
 
-            INSTRUCCIONES DE FORMATO:
-            Comienza ÚNICAMENTE con 'Opción 1:'.
-            Muestra Opción 1, Opción 2 y '💡 Consejos de publicación'.
+            INSTRUCCIÓN CRÍTICA DE MARCA:
+            Antes de comenzar a escribir las opciones en español, DEBES escribir exactamente esta marca en una línea propia:
+            ===RESULTADO_FINAL===
+
+            Luego de escribir esa marca, presenta inmediatamente las opciones:
+            **Opción 1:** (Enfoque principal)
+            **Opción 2:** (Enfoque alternativo)
+            💡 **Consejos de publicación**
             """
             
             exito = False
@@ -183,18 +187,15 @@ with tab1:
                     try:
                         modelo = genai.GenerativeModel(mod_name)
                         respuesta = modelo.generate_content(prompt_usuario)
-                        
                         texto_bruto = respuesta.text
                         
-                        # ✂️ CORTADOR QUIRÚRGICO DE BORSADORES / PENSAMIENTOS
-                        # Busca el primer lugar donde aparezca "Opción 1" u "Opción 1:"
-                        coincidencia = re.search(r"(Opción 1|\*\*Opción 1)", texto_bruto, re.IGNORECASE)
-                        
-                        if coincidencia:
-                            # Recorta todo lo que esté antes de "Opción 1"
-                            texto_limpio = texto_bruto[coincidencia.start():]
+                        # CORTADOR PERFECTO: EXTRAE SOLO LO QUE ESTÁ DESPUÉS DE LA MARCA
+                        MARCA = "===RESULTADO_FINAL==="
+                        if MARCA in texto_bruto:
+                            texto_limpio = texto_bruto.split(MARCA)[-1].strip()
                         else:
-                            texto_limpio = texto_bruto
+                            # Si por algún motivo la IA no imprimió la marca, usa el texto original
+                            texto_limpio = texto_bruto.strip()
 
                         st.success("¡Anuncio generado exitosamente!")
                         st.subheader("📄 Resultado Generado")
@@ -207,7 +208,7 @@ with tab1:
                         continue
             
             if not exito:
-                st.error("❌ No se pudo conectar con los servidores de Google.")
+                st.error("❌ No se pudo conectar con los servidores de Google. Verifica la API Key.")
 
 # ---------------------------------------------------------
 # 6. PESTAÑA SECUNDARIA
