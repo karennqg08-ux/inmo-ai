@@ -1,5 +1,6 @@
 import streamlit as st
 import google.generativeai as genai
+import re
 
 # ---------------------------------------------------------
 # 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS
@@ -53,7 +54,7 @@ if api_key:
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/602/602275.png", width=60)
     st.title("InmoAI Pro")
-    st.caption("v1.3 • Salida Limpia Activada")
+    st.caption("v1.4 • Filtro de Salida Limpia")
     st.markdown("---")
     
     if modelos_candidatos:
@@ -79,7 +80,7 @@ st.markdown("""
 tab1, tab2 = st.tabs(["✨ Generador de Anuncios", "ℹ️ Guía & Soporte"])
 
 # ---------------------------------------------------------
-# 5. FORMULARIO Y GENERACIÓN CON INSTRUCCIÓN DE SISTEMA
+# 5. FORMULARIO Y GENERACIÓN CON FILTRO DE TEXTO
 # ---------------------------------------------------------
 with tab1:
     with st.form("formulario_propiedad_completo"):
@@ -155,32 +156,24 @@ with tab1:
         elif not direccion or not precio:
             st.warning("⚠️ Debes completar al menos los campos de Dirección y Precio.")
         else:
-            # Reglas estrictas de comportamiento en el System Instruction
-            instruccion_sistema = (
-                "Eres un copywriter inmobiliario de alto nivel. Tu única tarea es escribir propuestas publicitarias finales. "
-                "REGLA OBLIGATORIA: NUNCA muestres tu proceso de pensamiento, ni borradores, ni resúmenes de tareas, ni análisis previos. "
-                "Comienza DIRECTAMENTE con la primera opción de anuncio (ejemplo: 'Opción 1: ...'). Escribe todo en español."
-            )
-
             prompt_usuario = f"""
-            Redacta anuncios publicitarios persuasivos para la siguiente propiedad:
+            Escribe directamente los anuncios inmobiliarios en español para esta propiedad:
 
-            DATOS GENERALES:
+            DATOS:
             - Tipo: {tipo_propiedad}
-            - Dirección / Zona: {direccion}
+            - Ubicación: {direccion}
             - Precio: {precio}
             - Área privada: {area_privada if area_privada else 'No especificada'}
             - Área construida: {area_construida if area_construida else 'No especificada'}
             - Habitaciones: {habitaciones} | Baños: {banos} | Parqueaderos: {parqueaderos}
-            - Amenidades y notas: {notas}
-            - Tono comercial: {tono}
-            - Canal de difusión: {plataforma}
-            - Contacto / CTA: {cta}
+            - Amenidades: {notas}
+            - Tono: {tono}
+            - Canal: {plataforma}
+            - Contacto: {cta}
 
-            ESTRUCTURA DE SALIDA REQUERIDA:
-            1. Opción 1 (Con enfoque persuasivo y emocional según el tono elegido).
-            2. Opción 2 (Con enfoque alternativo y directo).
-            3. Bloque final de '💡 Consejos de publicación'.
+            INSTRUCCIONES DE FORMATO:
+            Comienza ÚNICAMENTE con 'Opción 1:'.
+            Muestra Opción 1, Opción 2 y '💡 Consejos de publicación'.
             """
             
             exito = False
@@ -188,17 +181,25 @@ with tab1:
             with st.spinner("Redactando propuesta publicitaria... ✍️"):
                 for mod_name in modelos_candidatos:
                     try:
-                        # Se pasa la regla del sistema directamente en la configuración del modelo
-                        modelo = genai.GenerativeModel(
-                            model_name=mod_name,
-                            system_instruction=instruccion_sistema
-                        )
+                        modelo = genai.GenerativeModel(mod_name)
                         respuesta = modelo.generate_content(prompt_usuario)
                         
+                        texto_bruto = respuesta.text
+                        
+                        # ✂️ CORTADOR QUIRÚRGICO DE BORSADORES / PENSAMIENTOS
+                        # Busca el primer lugar donde aparezca "Opción 1" u "Opción 1:"
+                        coincidencia = re.search(r"(Opción 1|\*\*Opción 1)", texto_bruto, re.IGNORECASE)
+                        
+                        if coincidencia:
+                            # Recorta todo lo que esté antes de "Opción 1"
+                            texto_limpio = texto_bruto[coincidencia.start():]
+                        else:
+                            texto_limpio = texto_bruto
+
                         st.success("¡Anuncio generado exitosamente!")
                         st.subheader("📄 Resultado Generado")
                         st.markdown("Copia el texto haciendo clic en el botón de la esquina superior derecha del recuadro:")
-                        st.code(respuesta.text, language="markdown")
+                        st.code(texto_limpio, language="markdown")
                         
                         exito = True
                         break
@@ -206,7 +207,7 @@ with tab1:
                         continue
             
             if not exito:
-                st.error("❌ No se pudo conectar con los servidores de Google. Verifica que la API Key esté activa.")
+                st.error("❌ No se pudo conectar con los servidores de Google.")
 
 # ---------------------------------------------------------
 # 6. PESTAÑA SECUNDARIA
