@@ -2,7 +2,7 @@ import streamlit as st
 import google.generativeai as genai
 
 # ---------------------------------------------------------
-# 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS CSS PROFESIONALES
+# 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS
 # ---------------------------------------------------------
 st.set_page_config(
     page_title="InmoAI - Generador Profesional de Anuncios",
@@ -11,7 +11,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Estilos CSS Corporativos
 st.markdown("""
 <style>
     #MainMenu {visibility: hidden;}
@@ -33,53 +32,41 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. CONEXIÓN AUTOMÁTICA Y BÚSQUEDA DINÁMICA DE MODELO
+# 2. CONEXIÓN AUTOMÁTICA Y LISTA DE MODELOS
 # ---------------------------------------------------------
 raw_key = st.secrets.get("GEMINI_API_KEY", "")
 api_key = raw_key.strip().strip('"').strip("'")
-modelo_seleccionado = None
+modelos_candidatos = []
 
 if api_key:
     try:
         genai.configure(api_key=api_key)
-        
-        # Buscamos dinámicamente los modelos activos que aceptan generación de texto
-        modelos_disponibles = []
+        # Obtenemos todos los modelos de texto disponibles
         for m in genai.list_models():
             if 'generateContent' in m.supported_generation_methods:
-                modelos_disponibles.append(m.name)
-        
-        if modelos_disponibles:
-            # Priorizamos modelos 'flash' o 'pro', o tomamos el primero que responda
-            for m in modelos_disponibles:
-                if "flash" in m:
-                    modelo_seleccionado = m
-                    break
-            if not modelo_seleccionado:
-                modelo_seleccionado = modelos_disponibles[0]
+                modelos_candidatos.append(m.name)
     except Exception as e:
-        st.error(f"Error al conectar con la IA: {e}")
+        st.error(f"Error al conectar con la API: {e}")
 
 # ---------------------------------------------------------
-# 3. BARRA LATERAL INFORMATIVA
+# 3. BARRA LATERAL
 # ---------------------------------------------------------
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/602/602275.png", width=60)
     st.title("InmoAI Pro")
-    st.caption("v1.0 • Panel de Control")
+    st.caption("v1.2 • Motor Multi-Modelo Activo")
     st.markdown("---")
     
-    if modelo_seleccionado:
+    if modelos_candidatos:
         st.success("🟢 Sistema Activo & Listo")
-        nombre_corto = modelo_seleccionado.replace("models/", "")
-        st.caption(f"🤖 Motor activo: `{nombre_corto}`")
+        st.caption(f"🤖 {len(modelos_candidatos)} motores de IA detectados")
     elif api_key:
-        st.warning("⚠️ Buscando modelos compatibles...")
+        st.warning("⚠️ Validando conexión con Google...")
     else:
         st.error("🔴 Falta configurar GEMINI_API_KEY en Secrets.")
         
     st.markdown("---")
-    st.info("💡 **Estado del Servicio:**\nAcceso Ilimitado Activado.")
+    st.info("💡 **Estado del Servicio:**\nAcceso Comercial Activo.")
 
 # ---------------------------------------------------------
 # 4. ENCABEZADO
@@ -94,7 +81,7 @@ st.markdown("""
 tab1, tab2 = st.tabs(["✨ Generador de Anuncios", "ℹ️ Guía & Soporte"])
 
 # ---------------------------------------------------------
-# 5. PESTAÑA PRINCIPAL (FORMULARIO Y GENERACIÓN)
+# 5. FORMULARIO Y GENERACIÓN CON SISTEMA FALLBACK
 # ---------------------------------------------------------
 with tab1:
     with st.form("formulario_propiedad_completo"):
@@ -165,50 +152,58 @@ with tab1:
     if submit_button:
         if not api_key:
             st.error("⚠️ La aplicación no tiene una API Key configurada en el servidor.")
-        elif not modelo_seleccionado:
-            st.error("⚠️ No se encontró un motor de IA activo en este momento.")
+        elif not modelos_candidatos:
+            st.error("⚠️ No se encontraron modelos de IA disponibles para esta clave API.")
         elif not direccion or not precio:
             st.warning("⚠️ Debes completar al menos los campos de Dirección y Precio.")
         else:
-            try:
-                modelo = genai.GenerativeModel(modelo_seleccionado)
-                
-                prompt_usuario = f"""
-                Eres un copywriter y experto en marketing inmobiliario de alto nivel. Tu tarea es redactar propuestas de anuncios altamente persuasivos para la venta o arriendo de una propiedad.
+            prompt_usuario = f"""
+            Eres un copywriter y experto en marketing inmobiliario de alto nivel. Tu tarea es redactar propuestas de anuncios altamente persuasivos para la venta o arriendo de una propiedad.
 
-                INFORMACIÓN COMPLETA DE LA PROPIEDAD:
-                - Tipo de propiedad: {tipo_propiedad}
-                - Dirección / Zona: {direccion}
-                - Precio: {precio}
-                - Área privada: {area_privada if area_privada else 'No especificada'}
-                - Área construida: {area_construida if area_construida else 'No especificada'}
-                - Habitaciones: {habitaciones}
-                - Baños: {banos}
-                - Parqueaderos: {parqueaderos}
-                - Notas y amenidades clave: {notas}
-                - Tono deseado: {tono}
-                - Plataforma de destino: {plataforma}
-                - Llamado a la acción (CTA / Contacto): {cta}
+            INFORMACIÓN COMPLETA DE LA PROPIEDAD:
+            - Tipo de propiedad: {tipo_propiedad}
+            - Dirección / Zona: {direccion}
+            - Precio: {precio}
+            - Área privada: {area_privada if area_privada else 'No especificada'}
+            - Área construida: {area_construida if area_construida else 'No especificada'}
+            - Habitaciones: {habitaciones}
+            - Baños: {banos}
+            - Parqueaderos: {parqueaderos}
+            - Notas y amenidades clave: {notas}
+            - Tono deseado: {tono}
+            - Plataforma de destino: {plataforma}
+            - Llamado a la acción (CTA / Contacto): {cta}
 
-                INSTRUCCIONES CRÍTICAS DE SALIDA:
-                1. NO incluyas borradores, ni tus pensamientos internos, ni listas de verificación antes del anuncio.
-                2. Comienza DIRECTAMENTE con las opciones del anuncio final estructurado.
-                3. Integra de forma natural el Área Privada y Área Construida resaltando la amplitud de los espacios.
-                4. Transforma las características físicas en beneficios emocionales o prácticos según el tono seleccionado.
-                5. Estructura con viñetas claras, emojis acordes al tema y hashtags estratégicos si aplica a la plataforma.
-                6. Al final de los anuncios, incluye un pequeño bloque de "💡 Consejos de publicación".
-                """
-                
-                with st.spinner("Redactando propuesta publicitaria... ✍️"):
-                    respuesta = modelo.generate_content(prompt_usuario)
-                
-                st.success("¡Anuncio generado exitosamente!")
-                st.subheader("📄 Resultado Generado")
-                st.markdown("Copia el texto haciendo clic en el botón de la esquina superior derecha del recuadro:")
-                st.code(respuesta.text, language="markdown")
-                
-            except Exception as e:
-                st.error(f"Error en la generación del contenido: {e}")
+            INSTRUCCIONES CRÍTICAS DE SALIDA:
+            1. NO incluyas borradores, ni tus pensamientos internos, ni listas de verificación antes del anuncio.
+            2. Comienza DIRECTAMENTE con las opciones del anuncio final estructurado.
+            3. Integra de forma natural el Área Privada y Área Construida resaltando la amplitud de los espacios.
+            4. Transforma las características físicas en beneficios emocionales o prácticos según el tono seleccionado.
+            5. Estructura con viñetas claras, emojis acordes al tema y hashtags estratégicos si aplica a la plataforma.
+            6. Al final de los anuncios, incluye un pequeño bloque de "💡 Consejos de publicación".
+            """
+            
+            exito = False
+            
+            with st.spinner("Redactando propuesta publicitaria... ✍️"):
+                # Probamos con cada modelo de la lista hasta que uno responda con éxito
+                for mod_name in modelos_candidatos:
+                    try:
+                        modelo = genai.GenerativeModel(mod_name)
+                        respuesta = modelo.generate_content(prompt_usuario)
+                        
+                        st.success("¡Anuncio generado exitosamente!")
+                        st.subheader("📄 Resultado Generado")
+                        st.markdown("Copia el texto haciendo clic en el botón de la esquina superior derecha del recuadro:")
+                        st.code(respuesta.text, language="markdown")
+                        
+                        exito = True
+                        break # ¡Conexión exitosa! Salimos del bucle.
+                    except Exception:
+                        continue # Si falla un modelo específico, pasa en silencio al siguiente.
+            
+            if not exito:
+                st.error("❌ No se pudo conectar con los servidores de Google. Verifica que la API Key esté activa.")
 
 # ---------------------------------------------------------
 # 6. PESTAÑA SECUNDARIA
