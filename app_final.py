@@ -17,9 +17,10 @@ st.set_page_config(
 
 st.markdown("""
 <style>
+    /* Ocultamos el menú estándar de Streamlit y el pie de página, pero DEJAMOS VISIBLE el botón lateral */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    header {visibility: hidden;}
+    
     .stApp { background-color: #F8FAFC; }
     .main-header {
         background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
@@ -28,6 +29,20 @@ st.markdown("""
         color: white;
         margin-bottom: 2rem;
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+    .main-header h1 { color: #F8FAFC !important; font-weight: 700; margin-bottom: 0.5rem; }
+    .main-header p { color: #94A3B8; font-size: 1.1rem; }
+    .stButton>button { border-radius: 8px; font-weight: 600; }
+    .paywall-box {
+        background-color: #FEF2F2;
+        border: 2px solid #EF4444;
+        border-radius: 12px;
+        padding: 2rem;
+        text-align: center;
+        margin-top: 1rem;
+    }
+</style>
+""", unsafe_allow_html=True)
     }
     .main-header h1 { color: #F8FAFC !important; font-weight: 700; margin-bottom: 0.5rem; }
     .main-header p { color: #94A3B8; font-size: 1.1rem; }
