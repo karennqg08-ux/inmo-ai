@@ -1,7 +1,6 @@
 import streamlit as st
 import google.generativeai as genai
 from supabase import create_client, Client
-from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 # ---------------------------------------------------------
 # 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS
@@ -42,7 +41,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. CONEXIÓN CON SUPABASE Y GEMINI API
+# 2. CONEXIÓN CON SUPABASE Y PARCHE ESTÁTICO DE PKCE
 # ---------------------------------------------------------
 raw_key = st.secrets.get("GEMINI_API_KEY", "")
 api_key = raw_key.strip().strip('"').strip("'")
@@ -50,10 +49,30 @@ api_key = raw_key.strip().strip('"').strip("'")
 supabase_url = st.secrets.get("SUPABASE_URL", "").strip().rstrip('/')
 supabase_key = st.secrets.get("SUPABASE_KEY", "").strip().strip('"').strip("'")
 
+# Clave estática de verificación para evitar desfasamiento en Streamlit
+FIXED_PKCE_VERIFIER = "InmoAIStudioPKCECodeVerifierKey2026SecureConstantStringForStreamlit123456"
+
+# Forzar el verificador en los módulos internos de gotrue si están cargados
+try:
+    import gotrue.helpers
+    gotrue.helpers.generate_code_verifier = lambda *args, **kwargs: FIXED_PKCE_VERIFIER
+except Exception:
+    pass
+
+try:
+    import gotrue._sync.gotrue_client
+    gotrue._sync.gotrue_client.generate_code_verifier = lambda *args, **kwargs: FIXED_PKCE_VERIFIER
+except Exception:
+    pass
+
 supabase: Client = None
 if supabase_url and supabase_key:
     try:
         supabase = create_client(supabase_url, supabase_key)
+        # Inyectar la clave directamente en la instancia activa del cliente
+        supabase.auth._code_verifier = FIXED_PKCE_VERIFIER
+        if hasattr(supabase.auth, "_generate_code_verifier"):
+            supabase.auth._generate_code_verifier = lambda *args, **kwargs: FIXED_PKCE_VERIFIER
     except Exception as e:
         st.error(f"Error al inicializar cliente de Supabase: {e}")
 
@@ -76,26 +95,21 @@ if "usuario" not in st.session_state:
 # Procesar retorno de Google OAuth
 params = st.query_params
 if "code" in params and supabase:
+    code = params["code"]
     try:
-        code = params["code"]
-        # Recuperar el verificador dinámico traído en el parámetro 'cv'
-        code_verifier = params.get("cv") or st.session_state.get("code_verifier") or getattr(supabase.auth, "_code_verifier", None)
+        # Intercambiar código forzando la clave constante de verificación
+        res_auth = supabase.auth.exchange_code_for_session({
+            "auth_code": code,
+            "code_verifier": FIXED_PKCE_VERIFIER
+        })
         
-        auth_payload = {"auth_code": code}
-        if code_verifier:
-            auth_payload["code_verifier"] = code_verifier
-
-        res_auth = supabase.auth.exchange_code_for_session(auth_payload)
-        
-        if res_auth.user:
+        if res_auth and res_auth.user:
             email_google = res_auth.user.email.lower()
-            # Buscar si el usuario ya existe en la tabla de Supabase
             existente = supabase.table("usuarios").select("*").eq("email", email_google).execute()
             
             if existente.data:
                 st.session_state["usuario"] = existente.data[0]
             else:
-                # Crear nuevo usuario registrado con Google
                 nuevo_user = {
                     "email": email_google,
                     "password": "oauth_google_login",
@@ -109,9 +123,24 @@ if "code" in params and supabase:
             st.query_params.clear()
             st.rerun()
     except Exception as err:
-        st.error(f"Error al procesar el inicio con Google: {err}")
+        # Limpiar los parámetros de la URL para evitar bucles con códigos expirados
+        st.query_params.clear()
+        
+        # Verificar si la sesión ya había sido iniciada
+        try:
+            sess = supabase.auth.get_session()
+            if sess and sess.user:
+                email_google = sess.user.email.lower()
+                existente = supabase.table("usuarios").select("*").eq("email", email_google).execute()
+                if existente.data:
+                    st.session_state["usuario"] = existente.data[0]
+                    st.rerun()
+        except Exception:
+            pass
+        
+        st.warning("El enlace de inicio caducó o ya fue utilizado. Por favor, haz clic de nuevo en 'Continuar con Google'.")
 
-# Generar URL de autenticación con Google inyectando la llave en la redirección
+# Generar URL de autenticación con Google
 google_login_url = None
 if supabase:
     try:
@@ -122,26 +151,7 @@ if supabase:
                 "redirect_to": app_redirect_url
             }
         })
-        
-        raw_url = res_oauth.url
-        real_verifier = getattr(supabase.auth, "_code_verifier", None)
-        
-        if real_verifier:
-            st.session_state["code_verifier"] = real_verifier
-            # Inyectar la llave dinámicamente en el enlace de retorno
-            parsed = urlparse(raw_url)
-            qd = parse_qs(parsed.query)
-            if 'redirect_to' in qd:
-                orig_redirect = qd['redirect_to'][0]
-                sep = "&" if "?" in orig_redirect else "?"
-                new_redirect = f"{orig_redirect}{sep}cv={real_verifier}"
-                qd['redirect_to'] = [new_redirect]
-                new_query = urlencode(qd, doseq=True)
-                google_login_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
-            else:
-                google_login_url = raw_url
-        else:
-            google_login_url = raw_url
+        google_login_url = res_oauth.url
     except Exception:
         google_login_url = None
 
