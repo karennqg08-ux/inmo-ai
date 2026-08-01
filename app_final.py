@@ -1,7 +1,9 @@
 import streamlit as st
 import google.generativeai as genai
 
-# 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS
+# ---------------------------------------------------------
+# 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS CSS PROFESIONALES
+# ---------------------------------------------------------
 st.set_page_config(
     page_title="InmoAI - Generador Profesional de Anuncios",
     page_icon="🏢",
@@ -30,34 +32,58 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 2. CONEXIÓN AUTOMÁTICA CON API KEY
-api_key = st.secrets.get("GEMINI_API_KEY")
+# ---------------------------------------------------------
+# 2. CONEXIÓN AUTOMÁTICA Y BÚSQUEDA DINÁMICA DE MODELO
+# ---------------------------------------------------------
+raw_key = st.secrets.get("GEMINI_API_KEY", "")
+api_key = raw_key.strip().strip('"').strip("'")
 modelo_seleccionado = None
 
 if api_key:
     try:
         genai.configure(api_key=api_key)
-        # Seleccionamos gemini-1.5-flash por defecto
-        modelo_seleccionado = "models/gemini-1.5-flash"
+        
+        # Buscamos dinámicamente los modelos activos que aceptan generación de texto
+        modelos_disponibles = []
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                modelos_disponibles.append(m.name)
+        
+        if modelos_disponibles:
+            # Priorizamos modelos 'flash' o 'pro', o tomamos el primero que responda
+            for m in modelos_disponibles:
+                if "flash" in m:
+                    modelo_seleccionado = m
+                    break
+            if not modelo_seleccionado:
+                modelo_seleccionado = modelos_disponibles[0]
     except Exception as e:
         st.error(f"Error al conectar con la IA: {e}")
 
+# ---------------------------------------------------------
 # 3. BARRA LATERAL INFORMATIVA
+# ---------------------------------------------------------
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/602/602275.png", width=60)
     st.title("InmoAI Pro")
     st.caption("v1.0 • Panel de Control")
     st.markdown("---")
     
-    if api_key:
+    if modelo_seleccionado:
         st.success("🟢 Sistema Activo & Listo")
+        nombre_corto = modelo_seleccionado.replace("models/", "")
+        st.caption(f"🤖 Motor activo: `{nombre_corto}`")
+    elif api_key:
+        st.warning("⚠️ Buscando modelos compatibles...")
     else:
-        st.error("🔴 Falta configurar GEMINI_API_KEY en los Secrets.")
+        st.error("🔴 Falta configurar GEMINI_API_KEY en Secrets.")
         
     st.markdown("---")
     st.info("💡 **Estado del Servicio:**\nAcceso Ilimitado Activado.")
 
+# ---------------------------------------------------------
 # 4. ENCABEZADO
+# ---------------------------------------------------------
 st.markdown("""
 <div class="main-header">
     <h1>🏢 InmoAI Studio</h1>
@@ -67,7 +93,9 @@ st.markdown("""
 
 tab1, tab2 = st.tabs(["✨ Generador de Anuncios", "ℹ️ Guía & Soporte"])
 
-# 5. PESTAÑA PRINCIPAL (FORMULARIO)
+# ---------------------------------------------------------
+# 5. PESTAÑA PRINCIPAL (FORMULARIO Y GENERACIÓN)
+# ---------------------------------------------------------
 with tab1:
     with st.form("formulario_propiedad_completo"):
         col1, col2 = st.columns(2)
@@ -137,6 +165,8 @@ with tab1:
     if submit_button:
         if not api_key:
             st.error("⚠️ La aplicación no tiene una API Key configurada en el servidor.")
+        elif not modelo_seleccionado:
+            st.error("⚠️ No se encontró un motor de IA activo en este momento.")
         elif not direccion or not precio:
             st.warning("⚠️ Debes completar al menos los campos de Dirección y Precio.")
         else:
@@ -180,7 +210,9 @@ with tab1:
             except Exception as e:
                 st.error(f"Error en la generación del contenido: {e}")
 
+# ---------------------------------------------------------
 # 6. PESTAÑA SECUNDARIA
+# ---------------------------------------------------------
 with tab2:
     st.subheader("💡 ¿Cómo sacar el máximo provecho a InmoAI?")
     st.markdown("""
