@@ -1,11 +1,12 @@
 import streamlit as st
 import google.generativeai as genai
+from supabase import create_client, Client
 
 # ---------------------------------------------------------
-# 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS CORPORATIVOS
+# 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS
 # ---------------------------------------------------------
 st.set_page_config(
-    page_title="InmoAI - Generador Profesional de Anuncios",
+    page_title="InmoAI - Plataforma Profesional",
     page_icon="🏢",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -28,16 +29,34 @@ st.markdown("""
     .main-header h1 { color: #F8FAFC !important; font-weight: 700; margin-bottom: 0.5rem; }
     .main-header p { color: #94A3B8; font-size: 1.1rem; }
     .stButton>button { border-radius: 8px; font-weight: 600; }
+    .paywall-box {
+        background-color: #FEF2F2;
+        border: 2px solid #EF4444;
+        border-radius: 12px;
+        padding: 2rem;
+        text-align: center;
+        margin-top: 1rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. CONEXIÓN AUTOMÁTICA Y LISTA DE MODELOS
+# 2. CONEXIÓN CON SUPABASE Y GEMINI API
 # ---------------------------------------------------------
 raw_key = st.secrets.get("GEMINI_API_KEY", "")
 api_key = raw_key.strip().strip('"').strip("'")
-modelos_candidatos = []
 
+supabase_url = st.secrets.get("SUPABASE_URL", "")
+supabase_key = st.secrets.get("SUPABASE_KEY", "")
+
+supabase: Client = None
+if supabase_url and supabase_key:
+    try:
+        supabase = create_client(supabase_url, supabase_key)
+    except Exception as e:
+        st.error(f"Error al conectar con la base de datos: {e}")
+
+modelos_candidatos = []
 if api_key:
     try:
         genai.configure(api_key=api_key)
@@ -45,30 +64,107 @@ if api_key:
             if 'generateContent' in m.supported_generation_methods:
                 modelos_candidatos.append(m.name)
     except Exception as e:
-        st.error(f"Error al conectar con la API: {e}")
+        st.error(f"Error al conectar con Google AI: {e}")
 
 # ---------------------------------------------------------
-# 3. BARRA LATERAL
+# 3. GESTIÓN DE SESIÓN DE USUARIO
 # ---------------------------------------------------------
+if "usuario" not in st.session_state:
+    st.session_state["usuario"] = None
+
+# ---------------------------------------------------------
+# 4. PANTALLA DE INICIO DE SESIÓN / REGISTRO
+# ---------------------------------------------------------
+if not st.session_state["usuario"]:
+    st.markdown("""
+    <div class="main-header" style="text-align: center;">
+        <h1>🏢 bienvenido a InmoAI Studio</h1>
+        <p>Crea tu cuenta gratuita y genera tus primeros 3 anuncios inmobiliarios de alto impacto.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col_center1, col_center2, col_center3 = st.columns([1, 2, 1])
+    
+    with col_center2:
+        tab_login, tab_registro = st.tabs(["🔑 Iniciar Sesión", "📝 Crear Cuenta Gratis"])
+        
+        # TAB LOGIN
+        with tab_login:
+            st.subheader("Ingresa a tu cuenta")
+            email_login = st.text_input("Correo Electrónico", key="login_email")
+            pass_login = st.text_input("Contraseña", type="password", key="login_pass")
+            
+            if st.button("Iniciar Sesión", type="primary", use_container_width=True):
+                if email_login and pass_login:
+                    res = supabase.table("usuarios").select("*").eq("email", email_login.strip().lower()).eq("password", pass_login).execute()
+                    if res.data:
+                        st.session_state["usuario"] = res.data[0]
+                        st.success("¡Bienvenido de nuevo!")
+                        st.rerun()
+                    else:
+                        st.error("Correo o contraseña incorrectos.")
+                else:
+                    st.warning("Completa todos los campos.")
+
+        # TAB REGISTRO
+        with tab_registro:
+            st.subheader("Regístrate en 5 segundos")
+            email_reg = st.text_input("Correo Electrónico", key="reg_email")
+            pass_reg = st.text_input("Contraseña", type="password", key="reg_pass")
+            
+            if st.button("Crear Cuenta Gratis", type="primary", use_container_width=True):
+                if email_reg and pass_reg:
+                    # Verificar si ya existe
+                    existe = supabase.table("usuarios").select("*").eq("email", email_reg.strip().lower()).execute()
+                    if existe.data:
+                        st.warning("Este correo ya está registrado. Ve a Iniciar Sesión.")
+                    else:
+                        # Crear usuario nuevo
+                        nuevo = {
+                            "email": email_reg.strip().lower(),
+                            "password": pass_reg,
+                            "generaciones": 0,
+                            "suscrito": False
+                        }
+                        insert_res = supabase.table("usuarios").insert(nuevo).execute()
+                        if insert_res.data:
+                            st.session_state["usuario"] = insert_res.data[0]
+                            st.success("¡Cuenta creada exitosamente! Tienes 3 anuncios gratis.")
+                            st.rerun()
+                        else:
+                            st.error("Error al registrar la cuenta.")
+                else:
+                    st.warning("Completa todos los campos.")
+
+    st.stop() # Detiene la ejecución para no mostrar la app hasta que inicie sesión.
+
+# ---------------------------------------------------------
+# 5. APLICACIÓN PRINCIPAL (USUARIO LOGUEADO)
+# ---------------------------------------------------------
+user = st.session_state["usuario"]
+generaciones_usadas = user.get("generaciones", 0)
+es_suscrito = user.get("suscrito", False)
+
+# BARRA LATERAL
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/602/602275.png", width=60)
     st.title("InmoAI Pro")
-    st.caption("v1.5 • Delimitador Secreto Activo")
+    st.caption(f"👤 `{user['email']}`")
     st.markdown("---")
     
-    if modelos_candidatos:
-        st.success("🟢 Sistema Activo & Listo")
-    elif api_key:
-        st.warning("⚠️ Validando conexión con Google...")
+    if es_suscrito:
+        st.success("💎 Plan Pro Activo (Ilimitado)")
     else:
-        st.error("🔴 Falta configurar GEMINI_API_KEY en Secrets.")
-        
+        restantes = max(0, 3 - generaciones_usadas)
+        st.info(f"📊 **Prueba Gratuita:**\nTe quedan **{restantes} de 3** anuncios.")
+        st.progress(min(1.0, generaciones_usadas / 3))
+    
     st.markdown("---")
-    st.info("💡 **Estado del Servicio:**\nAcceso Comercial Activo.")
+    if st.button("🚪 Cerrar Sesión", use_container_width=True):
+        st.session_state["usuario"] = None
+        st.rerun()
 
-# ---------------------------------------------------------
-# 4. ENCABEZADO
-# ---------------------------------------------------------
+# ENCABEZADO PRINCIPAL
 st.markdown("""
 <div class="main-header">
     <h1>🏢 InmoAI Studio</h1>
@@ -76,12 +172,30 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-tab1, tab2 = st.tabs(["✨ Generador de Anuncios", "ℹ️ Guía & Soporte"])
+# VERIFICACIÓN DE LÍMITE DE PRUEBA GRATUITA (PAYWALL)
+alcanzo_limite = (not es_suscrito) and (generaciones_usadas >= 3)
 
-# ---------------------------------------------------------
-# 5. FORMULARIO Y GENERACIÓN DE CONTENIDO
-# ---------------------------------------------------------
-with tab1:
+if alcanzo_limite:
+    st.markdown("""
+    <div class="paywall-box">
+        <h2 style="color: #991B1B;">🔒 Has agotado tus 3 anuncios de prueba gratuita</h2>
+        <p style="color: #7F1D1D; font-size: 1.1rem;">
+            ¡Esperamos que hayas disfrutado de InmoAI! Para seguir generando anuncios ilimitados para todas tus propiedades, activa tu suscripción mensual.
+        </p>
+        <hr style="border-top: 1px solid #FECACA; margin: 1.5rem 0;">
+        <h3 style="color: #991B1B;">🚀 Plan InmoAI Pro - Acceso Ilimitado</h3>
+        <p style="font-size: 1.5rem; font-weight: bold; color: #1E293B;">$49,000 COP / mes</p>
+        <p>✅ Generaciones ilimitadas • ✅ Todos los formatos (Redes, Portales, WhatsApp) • ✅ Soporte prioritario</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Botón directo de contacto/pago (puedes cambiar este enlace por tu link de WhatsApp o Mercado Pago)
+    st.markdown("<br>", unsafe_allow_html=True)
+    link_pago = "https://wa.me/tu_numero_de_whatsapp?text=Hola,%20quiero%20activar%20mi%20suscripcion%20InmoAI%20Pro"
+    st.link_button("💳 Activar Suscripción Pro Ahora", link_pago, type="primary", use_container_width=True)
+
+else:
+    # FORMULARIO DE GENERACIÓN
     with st.form("formulario_propiedad_completo"):
         col1, col2 = st.columns(2)
 
@@ -189,34 +303,25 @@ with tab1:
                         respuesta = modelo.generate_content(prompt_usuario)
                         texto_bruto = respuesta.text
                         
-                        # CORTADOR PERFECTO: EXTRAE SOLO LO QUE ESTÁ DESPUÉS DE LA MARCA
                         MARCA = "===RESULTADO_FINAL==="
                         if MARCA in texto_bruto:
                             texto_limpio = texto_bruto.split(MARCA)[-1].strip()
                         else:
-                            # Si por algún motivo la IA no imprimió la marca, usa el texto original
                             texto_limpio = texto_bruto.strip()
 
                         st.success("¡Anuncio generado exitosamente!")
                         st.subheader("📄 Resultado Generado")
-                        st.markdown("Copia el texto haciendo clic en el botón de la esquina superior derecha del recuadro:")
                         st.code(texto_limpio, language="markdown")
+                        
+                        # ACTUALIZAR CONTADOR DE GENERACIONES EN SUPABASE
+                        nuevas_generaciones = generaciones_usadas + 1
+                        supabase.table("usuarios").update({"generaciones": nuevas_generaciones}).eq("id", user["id"]).execute()
+                        st.session_state["usuario"]["generaciones"] = nuevas_generaciones
                         
                         exito = True
                         break
-                    except Exception:
+                    except Exception as e:
                         continue
             
             if not exito:
-                st.error("❌ No se pudo conectar con los servidores de Google. Verifica la API Key.")
-
-# ---------------------------------------------------------
-# 6. PESTAÑA SECUNDARIA
-# ---------------------------------------------------------
-with tab2:
-    st.subheader("💡 ¿Cómo sacar el máximo provecho a InmoAI?")
-    st.markdown("""
-    * **Sé específico en las notas:** Entre más amenidades describas, mejor será el gancho comercial.
-    * **Prueba varios tonos:** Para propiedades lujosas usa el tono *Sofisticado*, para familias jóvenes usa *Moderno*.
-    * **Copia rápida:** Usa el botón flotante de copia en el recuadro gris de resultados para pegar directamente en tu red social o WhatsApp.
-    """)
+                st.error("❌ No se pudo conectar con los servidores de Google. Inténtalo de nuevo.")
