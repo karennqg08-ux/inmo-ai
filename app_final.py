@@ -41,7 +41,6 @@ modelos_candidatos = []
 if api_key:
     try:
         genai.configure(api_key=api_key)
-        # Obtenemos todos los modelos de texto disponibles
         for m in genai.list_models():
             if 'generateContent' in m.supported_generation_methods:
                 modelos_candidatos.append(m.name)
@@ -54,12 +53,11 @@ if api_key:
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/602/602275.png", width=60)
     st.title("InmoAI Pro")
-    st.caption("v1.2 • Motor Multi-Modelo Activo")
+    st.caption("v1.3 • Salida Limpia Activada")
     st.markdown("---")
     
     if modelos_candidatos:
         st.success("🟢 Sistema Activo & Listo")
-        st.caption(f"🤖 {len(modelos_candidatos)} motores de IA detectados")
     elif api_key:
         st.warning("⚠️ Validando conexión con Google...")
     else:
@@ -81,7 +79,7 @@ st.markdown("""
 tab1, tab2 = st.tabs(["✨ Generador de Anuncios", "ℹ️ Guía & Soporte"])
 
 # ---------------------------------------------------------
-# 5. FORMULARIO Y GENERACIÓN CON SISTEMA FALLBACK
+# 5. FORMULARIO Y GENERACIÓN CON INSTRUCCIÓN DE SISTEMA
 # ---------------------------------------------------------
 with tab1:
     with st.form("formulario_propiedad_completo"):
@@ -157,39 +155,44 @@ with tab1:
         elif not direccion or not precio:
             st.warning("⚠️ Debes completar al menos los campos de Dirección y Precio.")
         else:
-            prompt_usuario = f"""
-            Eres un copywriter y experto en marketing inmobiliario de alto nivel. Tu tarea es redactar propuestas de anuncios altamente persuasivos para la venta o arriendo de una propiedad.
+            # Reglas estrictas de comportamiento en el System Instruction
+            instruccion_sistema = (
+                "Eres un copywriter inmobiliario de alto nivel. Tu única tarea es escribir propuestas publicitarias finales. "
+                "REGLA OBLIGATORIA: NUNCA muestres tu proceso de pensamiento, ni borradores, ni resúmenes de tareas, ni análisis previos. "
+                "Comienza DIRECTAMENTE con la primera opción de anuncio (ejemplo: 'Opción 1: ...'). Escribe todo en español."
+            )
 
-            INFORMACIÓN COMPLETA DE LA PROPIEDAD:
-            - Tipo de propiedad: {tipo_propiedad}
+            prompt_usuario = f"""
+            Redacta anuncios publicitarios persuasivos para la siguiente propiedad:
+
+            DATOS GENERALES:
+            - Tipo: {tipo_propiedad}
             - Dirección / Zona: {direccion}
             - Precio: {precio}
             - Área privada: {area_privada if area_privada else 'No especificada'}
             - Área construida: {area_construida if area_construida else 'No especificada'}
-            - Habitaciones: {habitaciones}
-            - Baños: {banos}
-            - Parqueaderos: {parqueaderos}
-            - Notas y amenidades clave: {notas}
-            - Tono deseado: {tono}
-            - Plataforma de destino: {plataforma}
-            - Llamado a la acción (CTA / Contacto): {cta}
+            - Habitaciones: {habitaciones} | Baños: {banos} | Parqueaderos: {parqueaderos}
+            - Amenidades y notas: {notas}
+            - Tono comercial: {tono}
+            - Canal de difusión: {plataforma}
+            - Contacto / CTA: {cta}
 
-            INSTRUCCIONES CRÍTICAS DE SALIDA:
-            1. NO incluyas borradores, ni tus pensamientos internos, ni listas de verificación antes del anuncio.
-            2. Comienza DIRECTAMENTE con las opciones del anuncio final estructurado.
-            3. Integra de forma natural el Área Privada y Área Construida resaltando la amplitud de los espacios.
-            4. Transforma las características físicas en beneficios emocionales o prácticos según el tono seleccionado.
-            5. Estructura con viñetas claras, emojis acordes al tema y hashtags estratégicos si aplica a la plataforma.
-            6. Al final de los anuncios, incluye un pequeño bloque de "💡 Consejos de publicación".
+            ESTRUCTURA DE SALIDA REQUERIDA:
+            1. Opción 1 (Con enfoque persuasivo y emocional según el tono elegido).
+            2. Opción 2 (Con enfoque alternativo y directo).
+            3. Bloque final de '💡 Consejos de publicación'.
             """
             
             exito = False
             
             with st.spinner("Redactando propuesta publicitaria... ✍️"):
-                # Probamos con cada modelo de la lista hasta que uno responda con éxito
                 for mod_name in modelos_candidatos:
                     try:
-                        modelo = genai.GenerativeModel(mod_name)
+                        # Se pasa la regla del sistema directamente en la configuración del modelo
+                        modelo = genai.GenerativeModel(
+                            model_name=mod_name,
+                            system_instruction=instruccion_sistema
+                        )
                         respuesta = modelo.generate_content(prompt_usuario)
                         
                         st.success("¡Anuncio generado exitosamente!")
@@ -198,9 +201,9 @@ with tab1:
                         st.code(respuesta.text, language="markdown")
                         
                         exito = True
-                        break # ¡Conexión exitosa! Salimos del bucle.
+                        break
                     except Exception:
-                        continue # Si falla un modelo específico, pasa en silencio al siguiente.
+                        continue
             
             if not exito:
                 st.error("❌ No se pudo conectar con los servidores de Google. Verifica que la API Key esté activa.")
