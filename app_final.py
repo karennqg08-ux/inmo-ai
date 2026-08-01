@@ -17,7 +17,7 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    /* Ocultamos el menú estándar de Streamlit y el pie de página, pero DEJAMOS VISIBLE el botón lateral */
+    /* Ocultamos el menú estándar de Streamlit y el pie de página */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     
@@ -41,19 +41,12 @@ st.markdown("""
         text-align: center;
         margin-top: 1rem;
     }
-</style>
-""", unsafe_allow_html=True)
-    }
-    .main-header h1 { color: #F8FAFC !important; font-weight: 700; margin-bottom: 0.5rem; }
-    .main-header p { color: #94A3B8; font-size: 1.1rem; }
-    .stButton>button { border-radius: 8px; font-weight: 600; }
-    .paywall-box {
-        background-color: #FEF2F2;
-        border: 2px solid #EF4444;
-        border-radius: 12px;
-        padding: 2rem;
-        text-align: center;
-        margin-top: 1rem;
+    .admin-box {
+        background-color: #F0FDF4;
+        border: 1px solid #22C55E;
+        padding: 1rem;
+        border-radius: 8px;
+        margin-bottom: 1rem;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -66,6 +59,15 @@ api_key = raw_key.strip().strip('"').strip("'")
 
 supabase_url = st.secrets.get("SUPABASE_URL", "").strip().rstrip('/')
 supabase_key = st.secrets.get("SUPABASE_KEY", "").strip().strip('"').strip("'")
+
+# Correo del Administrador
+ADMIN_EMAIL = st.secrets.get("ADMIN_EMAIL", "admin@tuinmoai.com").strip().lower()
+
+# Enlace de pago (Mercado Pago / Wompi / WhatsApp)
+PAYMENT_LINK = st.secrets.get(
+    "PAYMENT_LINK", 
+    "https://wa.me/573000000000?text=Hola,%20quiero%20activar%20mi%20suscripcion%20InmoAI%20Pro"
+).strip()
 
 supabase: Client = None
 if supabase_url and supabase_key:
@@ -103,7 +105,6 @@ params = st.query_params
 if "code" in params and supabase:
     code = params["code"]
     try:
-        # Intercambiar código de autorización usando el verificador PKCE manual
         res_auth = supabase.auth.exchange_code_for_session({
             "auth_code": code,
             "code_verifier": FIXED_PKCE_VERIFIER
@@ -230,12 +231,13 @@ if not st.session_state["usuario"]:
 user = st.session_state["usuario"]
 generaciones_usadas = user.get("generaciones", 0)
 es_suscrito = user.get("suscrito", False)
+user_email = user.get("email", "").strip().lower()
 
 # BARRA LATERAL
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/602/602275.png", width=60)
     st.title("InmoAI Pro")
-    st.caption(f"👤 `{user['email']}`")
+    st.caption(f"👤 `{user_email}`")
     st.markdown("---")
     
     if es_suscrito:
@@ -246,6 +248,29 @@ with st.sidebar:
         st.progress(min(1.0, generaciones_usadas / 3))
     
     st.markdown("---")
+    
+    # PANEL DE ADMINISTRADOR (Visible solo para el dueño)
+    if user_email == ADMIN_EMAIL:
+        st.subheader("👑 Panel de Administración")
+        with st.expander("Gestionar Suscripciones"):
+            target_email = st.text_input("Correo del usuario", placeholder="ejemplo@correo.com", key="admin_target")
+            action = st.radio("Estado del Plan Pro", ["Activar (Suscrito)", "Desactivar (Free)"])
+            
+            if st.button("Guardar Cambios de Usuario", type="primary"):
+                if target_email and supabase:
+                    is_sub = (action == "Activar (Suscrito)")
+                    res = supabase.table("usuarios").update({"suscrito": is_sub}).eq("email", target_email.strip().lower()).execute()
+                    if res.data:
+                        st.success(f"¡Usuario `{target_email}` actualizado a {'Suscrito' if is_sub else 'Gratuito'}!")
+                        if target_email.strip().lower() == user_email:
+                            st.session_state["usuario"]["suscrito"] = is_sub
+                            st.rerun()
+                    else:
+                        st.error("No se encontró ningún usuario con ese correo.")
+                else:
+                    st.warning("Escribe un correo válido.")
+        st.markdown("---")
+
     if st.button("🚪 Cerrar Sesión", use_container_width=True):
         st.session_state["usuario"] = None
         st.rerun()
@@ -271,13 +296,12 @@ if alcanzo_limite:
         <hr style="border-top: 1px solid #FECACA; margin: 1.5rem 0;">
         <h3 style="color: #991B1B;">🚀 Plan InmoAI Pro - Acceso Ilimitado</h3>
         <p style="font-size: 1.5rem; font-weight: bold; color: #1E293B;">$49,000 COP / mes</p>
-        <p>✅ Generaciones ilimitadas • ✅ Todos los formatos • ✅ Soporte prioritario</p>
+        <p>✅ Generaciones ilimitadas • ✅ Todos los formatos • ✅ PSE / Nequi / Tarjetas</p>
     </div>
     """, unsafe_allow_html=True)
     
     st.markdown("<br>", unsafe_allow_html=True)
-    link_pago = "https://wa.me/tu_numero_de_whatsapp?text=Hola,%20quiero%20activar%20mi%20suscripcion%20InmoAI%20Pro"
-    st.link_button("💳 Activar Suscripción Pro Ahora", link_pago, type="primary", use_container_width=True)
+    st.link_button("💳 Activar Suscripción Pro Ahora ($49,000 COP)", PAYMENT_LINK, type="primary", use_container_width=True)
 
 else:
     # FORMULARIO DE GENERACIÓN DE ANUNCIOS
