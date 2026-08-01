@@ -46,15 +46,15 @@ st.markdown("""
 raw_key = st.secrets.get("GEMINI_API_KEY", "")
 api_key = raw_key.strip().strip('"').strip("'")
 
-supabase_url = st.secrets.get("SUPABASE_URL", "")
-supabase_key = st.secrets.get("SUPABASE_KEY", "")
+supabase_url = st.secrets.get("SUPABASE_URL", "").strip().rstrip('/')
+supabase_key = st.secrets.get("SUPABASE_KEY", "").strip().strip('"').strip("'")
 
 supabase: Client = None
 if supabase_url and supabase_key:
     try:
         supabase = create_client(supabase_url, supabase_key)
     except Exception as e:
-        st.error(f"Error al conectar con la base de datos: {e}")
+        st.error(f"Error al inicializar cliente de Supabase: {e}")
 
 modelos_candidatos = []
 if api_key:
@@ -78,7 +78,7 @@ if "usuario" not in st.session_state:
 if not st.session_state["usuario"]:
     st.markdown("""
     <div class="main-header" style="text-align: center;">
-        <h1>🏢 bienvenido a InmoAI Studio</h1>
+        <h1>🏢 Bienvenido a InmoAI Studio</h1>
         <p>Crea tu cuenta gratuita y genera tus primeros 3 anuncios inmobiliarios de alto impacto.</p>
     </div>
     """, unsafe_allow_html=True)
@@ -96,13 +96,16 @@ if not st.session_state["usuario"]:
             
             if st.button("Iniciar Sesión", type="primary", use_container_width=True):
                 if email_login and pass_login:
-                    res = supabase.table("usuarios").select("*").eq("email", email_login.strip().lower()).eq("password", pass_login).execute()
-                    if res.data:
-                        st.session_state["usuario"] = res.data[0]
-                        st.success("¡Bienvenido de nuevo!")
-                        st.rerun()
-                    else:
-                        st.error("Correo o contraseña incorrectos.")
+                    try:
+                        res = supabase.table("usuarios").select("*").eq("email", email_login.strip().lower()).eq("password", pass_login).execute()
+                        if res.data:
+                            st.session_state["usuario"] = res.data[0]
+                            st.success("¡Bienvenido de nuevo!")
+                            st.rerun()
+                        else:
+                            st.error("Correo o contraseña incorrectos.")
+                    except Exception as err:
+                        st.error(f"Error de conexión: {err}")
                 else:
                     st.warning("Completa todos los campos.")
 
@@ -114,29 +117,32 @@ if not st.session_state["usuario"]:
             
             if st.button("Crear Cuenta Gratis", type="primary", use_container_width=True):
                 if email_reg and pass_reg:
-                    # Verificar si ya existe
-                    existe = supabase.table("usuarios").select("*").eq("email", email_reg.strip().lower()).execute()
-                    if existe.data:
-                        st.warning("Este correo ya está registrado. Ve a Iniciar Sesión.")
-                    else:
-                        # Crear usuario nuevo
-                        nuevo = {
-                            "email": email_reg.strip().lower(),
-                            "password": pass_reg,
-                            "generaciones": 0,
-                            "suscrito": False
-                        }
-                        insert_res = supabase.table("usuarios").insert(nuevo).execute()
-                        if insert_res.data:
-                            st.session_state["usuario"] = insert_res.data[0]
-                            st.success("¡Cuenta creada exitosamente! Tienes 3 anuncios gratis.")
-                            st.rerun()
+                    try:
+                        # Verificar si el correo ya existe
+                        existe = supabase.table("usuarios").select("*").eq("email", email_reg.strip().lower()).execute()
+                        if existe.data:
+                            st.warning("Este correo ya está registrado. Ve a Iniciar Sesión.")
                         else:
-                            st.error("Error al registrar la cuenta.")
+                            # Insertar usuario nuevo
+                            nuevo = {
+                                "email": email_reg.strip().lower(),
+                                "password": pass_reg,
+                                "generaciones": 0,
+                                "suscrito": False
+                            }
+                            insert_res = supabase.table("usuarios").insert(nuevo).execute()
+                            if insert_res.data:
+                                st.session_state["usuario"] = insert_res.data[0]
+                                st.success("¡Cuenta creada exitosamente! Tienes 3 anuncios gratis.")
+                                st.rerun()
+                            else:
+                                st.error("No se pudo insertar el usuario.")
+                    except Exception as err:
+                        st.error(f"Error en el registro: {err}")
                 else:
                     st.warning("Completa todos los campos.")
 
-    st.stop() # Detiene la ejecución para no mostrar la app hasta que inicie sesión.
+    st.stop()
 
 # ---------------------------------------------------------
 # 5. APLICACIÓN PRINCIPAL (USUARIO LOGUEADO)
@@ -172,7 +178,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# VERIFICACIÓN DE LÍMITE DE PRUEBA GRATUITA (PAYWALL)
+# VERIFICACIÓN DE LÍMITE (PAYWALL)
 alcanzo_limite = (not es_suscrito) and (generaciones_usadas >= 3)
 
 if alcanzo_limite:
@@ -185,17 +191,16 @@ if alcanzo_limite:
         <hr style="border-top: 1px solid #FECACA; margin: 1.5rem 0;">
         <h3 style="color: #991B1B;">🚀 Plan InmoAI Pro - Acceso Ilimitado</h3>
         <p style="font-size: 1.5rem; font-weight: bold; color: #1E293B;">$49,000 COP / mes</p>
-        <p>✅ Generaciones ilimitadas • ✅ Todos los formatos (Redes, Portales, WhatsApp) • ✅ Soporte prioritario</p>
+        <p>✅ Generaciones ilimitadas • ✅ Todos los formatos • ✅ Soporte prioritario</p>
     </div>
     """, unsafe_allow_html=True)
     
-    # Botón directo de contacto/pago (puedes cambiar este enlace por tu link de WhatsApp o Mercado Pago)
     st.markdown("<br>", unsafe_allow_html=True)
     link_pago = "https://wa.me/tu_numero_de_whatsapp?text=Hola,%20quiero%20activar%20mi%20suscripcion%20InmoAI%20Pro"
     st.link_button("💳 Activar Suscripción Pro Ahora", link_pago, type="primary", use_container_width=True)
 
 else:
-    # FORMULARIO DE GENERACIÓN
+    # FORMULARIO DE GENERACIÓN DE ANUNCIOS
     with st.form("formulario_propiedad_completo"):
         col1, col2 = st.columns(2)
 
@@ -315,12 +320,15 @@ else:
                         
                         # ACTUALIZAR CONTADOR DE GENERACIONES EN SUPABASE
                         nuevas_generaciones = generaciones_usadas + 1
-                        supabase.table("usuarios").update({"generaciones": nuevas_generaciones}).eq("id", user["id"]).execute()
-                        st.session_state["usuario"]["generaciones"] = nuevas_generaciones
-                        
+                        try:
+                            supabase.table("usuarios").update({"generaciones": nuevas_generaciones}).eq("id", user["id"]).execute()
+                            st.session_state["usuario"]["generaciones"] = nuevas_generaciones
+                        except Exception as update_err:
+                            st.warning(f"Nota: No se pudo actualizar el contador: {update_err}")
+
                         exito = True
                         break
-                    except Exception as e:
+                    except Exception:
                         continue
             
             if not exito:
