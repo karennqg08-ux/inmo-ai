@@ -310,12 +310,16 @@ else:
 
         with col1:
             st.subheader("📍 Ubicación y Datos Clave")
+            tipo_negocio = st.selectbox(
+                "Tipo de operación",
+                ["Venta", "Arriendo Mensual", "Arriendo Amoblado / Temporal", "Cesión de Derechos / Proyecto"]
+            )
             direccion = st.text_input("Dirección / Zona", placeholder="Ej: Calle 79 sur #58-66, Envigado")
             tipo_propiedad = st.selectbox(
                 "Tipo de propiedad",
                 ["Apartamento", "Casa", "Casa Campestre", "Penthouse", "Oficina", "Local Comercial", "Lote / Terreno"]
             )
-            precio = st.text_input("Precio de oferta", placeholder="Ej: $267,000,000 COP")
+            precio = st.text_input("Precio de oferta", placeholder="Ej: $267,000,000 COP o $2,500,000 COP/mes")
             
             st.subheader("📐 Dimensiones")
             col_a1, col_a2 = st.columns(2)
@@ -382,7 +386,8 @@ else:
             Redacta propuestas de anuncios inmobiliarios profesionales en español.
 
             DATOS DE LA PROPIEDAD:
-            - Tipo: {tipo_propiedad}
+            - Tipo de operación: {tipo_negocio}
+            - Tipo de propiedad: {tipo_propiedad}
             - Ubicación: {direccion}
             - Precio: {precio}
             - Área privada: {area_privada if area_privada else 'No especificada'}
@@ -397,7 +402,7 @@ else:
             Antes de comenzar a escribir las opciones en español, DEBES escribir exactamente esta marca en una línea propia:
             ===RESULTADO_FINAL===
 
-            Luego de escribir esa marca, presenta inmediatamente las opciones:
+            Luego de escribir esa marca, presenta inmediatamente las opciones adaptadas específicamente para la operación de {tipo_negocio}:
             **Opción 1:** (Enfoque principal)
             **Opción 2:** (Enfoque alternativo)
             💡 **Consejos de publicación**
