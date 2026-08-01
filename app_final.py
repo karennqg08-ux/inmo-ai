@@ -29,6 +29,21 @@ st.markdown("""
     .main-header h1 { color: #F8FAFC !important; font-weight: 700; margin-bottom: 0.5rem; }
     .main-header p { color: #94A3B8; font-size: 1.1rem; }
     .stButton>button { border-radius: 8px; font-weight: 600; }
+    .google-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background-color: #FFFFFF;
+        color: #374151;
+        border: 1px solid #D1D5DB;
+        padding: 0.6rem 1rem;
+        border-radius: 8px;
+        font-weight: 600;
+        text-decoration: none;
+        margin-bottom: 1rem;
+        box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    }
+    .google-btn:hover { background-color: #F9FAFB; color: #111827; }
     .paywall-box {
         background-color: #FEF2F2;
         border: 2px solid #EF4444;
@@ -67,10 +82,54 @@ if api_key:
         st.error(f"Error al conectar con Google AI: {e}")
 
 # ---------------------------------------------------------
-# 3. GESTIÓN DE SESIÓN DE USUARIO
+# 3. GESTIÓN DE SESIÓN DE USUARIO & OAUTH
 # ---------------------------------------------------------
 if "usuario" not in st.session_state:
     st.session_state["usuario"] = None
+
+# Procesar retorno de Google OAuth (si viene un parámetro code o token en la URL)
+params = st.query_params
+if "code" in params and supabase:
+    try:
+        code = params["code"]
+        res_auth = supabase.auth.exchange_code_for_session({"auth_code": code})
+        if res_auth.user:
+            email_google = res_auth.user.email.lower()
+            # Buscar si el usuario ya existe en la tabla custom
+            existente = supabase.table("usuarios").select("*").eq("email", email_google).execute()
+            if existente.data:
+                st.session_state["usuario"] = existente.data[0]
+            else:
+                # Crear nuevo usuario registrado via Google
+                nuevo_user = {
+                    "email": email_google,
+                    "password": "oauth_google_login",
+                    "generaciones": 0,
+                    "suscrito": False
+                }
+                insert_res = supabase.table("usuarios").insert(nuevo_user).execute()
+                if insert_res.data:
+                    st.session_state["usuario"] = insert_res.data[0]
+            # Limpiar parámetros de la URL
+            st.query_params.clear()
+            st.rerun()
+    except Exception as err:
+        st.error(f"Error al procesar el inicio con Google: {err}")
+
+# Generar URL de autenticación con Google
+google_login_url = None
+if supabase:
+    try:
+        # Detectar la URL actual de la app o usar la configurada
+        res_oauth = supabase.auth.sign_in_with_oauth({
+            "provider": "google",
+            "options": {
+                "redirect_to": st.secrets.get("APP_URL", "https://share.streamlit.io")
+            }
+        })
+        google_login_url = res_oauth.url
+    except Exception:
+        google_login_url = None
 
 # ---------------------------------------------------------
 # 4. PANTALLA DE INICIO DE SESIÓN / REGISTRO
@@ -91,6 +150,11 @@ if not st.session_state["usuario"]:
         # TAB LOGIN
         with tab_login:
             st.subheader("Ingresa a tu cuenta")
+            
+            if google_login_url:
+                st.link_button("🌐 Continuar con Google", google_login_url, use_container_width=True)
+                st.markdown("<p style='text-align: center; color: #6B7280; font-size: 0.9rem;'>— o con tu correo —</p>", unsafe_allow_html=True)
+            
             email_login = st.text_input("Correo Electrónico", key="login_email")
             pass_login = st.text_input("Contraseña", type="password", key="login_pass")
             
@@ -112,18 +176,21 @@ if not st.session_state["usuario"]:
         # TAB REGISTRO
         with tab_registro:
             st.subheader("Regístrate en 5 segundos")
+            
+            if google_login_url:
+                st.link_button("🌐 Regístrate rápido con Google", google_login_url, use_container_width=True)
+                st.markdown("<p style='text-align: center; color: #6B7280; font-size: 0.9rem;'>— o crea una cuenta manual —</p>", unsafe_allow_html=True)
+
             email_reg = st.text_input("Correo Electrónico", key="reg_email")
             pass_reg = st.text_input("Contraseña", type="password", key="reg_pass")
             
             if st.button("Crear Cuenta Gratis", type="primary", use_container_width=True):
                 if email_reg and pass_reg:
                     try:
-                        # Verificar si el correo ya existe
                         existe = supabase.table("usuarios").select("*").eq("email", email_reg.strip().lower()).execute()
                         if existe.data:
                             st.warning("Este correo ya está registrado. Ve a Iniciar Sesión.")
                         else:
-                            # Insertar usuario nuevo
                             nuevo = {
                                 "email": email_reg.strip().lower(),
                                 "password": pass_reg,
