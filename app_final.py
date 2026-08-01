@@ -29,21 +29,6 @@ st.markdown("""
     .main-header h1 { color: #F8FAFC !important; font-weight: 700; margin-bottom: 0.5rem; }
     .main-header p { color: #94A3B8; font-size: 1.1rem; }
     .stButton>button { border-radius: 8px; font-weight: 600; }
-    .google-btn {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background-color: #FFFFFF;
-        color: #374151;
-        border: 1px solid #D1D5DB;
-        padding: 0.6rem 1rem;
-        border-radius: 8px;
-        font-weight: 600;
-        text-decoration: none;
-        margin-bottom: 1rem;
-        box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-    }
-    .google-btn:hover { background-color: #F9FAFB; color: #111827; }
     .paywall-box {
         background-color: #FEF2F2;
         border: 2px solid #EF4444;
@@ -87,20 +72,29 @@ if api_key:
 if "usuario" not in st.session_state:
     st.session_state["usuario"] = None
 
-# Procesar retorno de Google OAuth (si viene un parámetro code o token en la URL)
+# Verificador PKCE estático para evitar la pérdida de clave en relanzamiento de Streamlit
+PKCE_VERIFIER = "inmoai_studio_supabase_oauth_pkce_code_verifier_key_2026_secure"
+
+# Procesar retorno de Google OAuth
 params = st.query_params
 if "code" in params and supabase:
     try:
         code = params["code"]
-        res_auth = supabase.auth.exchange_code_for_session({"auth_code": code})
+        # Intercambiar código enviando la verificación PKCE
+        res_auth = supabase.auth.exchange_code_for_session({
+            "auth_code": code,
+            "code_verifier": PKCE_VERIFIER
+        })
+        
         if res_auth.user:
             email_google = res_auth.user.email.lower()
-            # Buscar si el usuario ya existe en la tabla custom
+            # Buscar si el usuario ya existe en la base de datos
             existente = supabase.table("usuarios").select("*").eq("email", email_google).execute()
+            
             if existente.data:
                 st.session_state["usuario"] = existente.data[0]
             else:
-                # Crear nuevo usuario registrado via Google
+                # Crear nuevo usuario registrado con Google (con 3 anuncios gratis)
                 nuevo_user = {
                     "email": email_google,
                     "password": "oauth_google_login",
@@ -110,21 +104,37 @@ if "code" in params and supabase:
                 insert_res = supabase.table("usuarios").insert(nuevo_user).execute()
                 if insert_res.data:
                     st.session_state["usuario"] = insert_res.data[0]
-            # Limpiar parámetros de la URL
+            
             st.query_params.clear()
             st.rerun()
     except Exception as err:
+        # Si falló la validación por PKCE, intentar obtener sesión previa activa
+        try:
+            sess = supabase.auth.get_session()
+            if sess and sess.user:
+                email_google = sess.user.email.lower()
+                existente = supabase.table("usuarios").select("*").eq("email", email_google).execute()
+                if existente.data:
+                    st.session_state["usuario"] = existente.data[0]
+                    st.query_params.clear()
+                    st.rerun()
+        except Exception:
+            pass
         st.error(f"Error al procesar el inicio con Google: {err}")
 
 # Generar URL de autenticación con Google
 google_login_url = None
 if supabase:
     try:
-        # Detectar la URL actual de la app o usar la configurada
+        # Inyectar el verificador en la instancia del cliente
+        if hasattr(supabase.auth, "_code_verifier"):
+            supabase.auth._code_verifier = PKCE_VERIFIER
+            
+        app_redirect_url = st.secrets.get("APP_URL", "https://share.streamlit.io")
         res_oauth = supabase.auth.sign_in_with_oauth({
             "provider": "google",
             "options": {
-                "redirect_to": st.secrets.get("APP_URL", "https://share.streamlit.io")
+                "redirect_to": app_redirect_url
             }
         })
         google_login_url = res_oauth.url
@@ -397,6 +407,9 @@ else:
                         break
                     except Exception:
                         continue
+            
+            if not exito:
+                st.error("❌ No se pudo conectar con los servidores de Google. Inténtalo de nuevo.")
             
             if not exito:
                 st.error("❌ No se pudo conectar con los servidores de Google. Inténtalo de nuevo.")
