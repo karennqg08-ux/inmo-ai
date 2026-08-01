@@ -1,6 +1,7 @@
 import streamlit as st
 import google.generativeai as genai
 from supabase import create_client, Client
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 # ---------------------------------------------------------
 # 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS
@@ -72,29 +73,29 @@ if api_key:
 if "usuario" not in st.session_state:
     st.session_state["usuario"] = None
 
-# Verificador PKCE estático para evitar la pérdida de clave en relanzamiento de Streamlit
-PKCE_VERIFIER = "inmoai_studio_supabase_oauth_pkce_code_verifier_key_2026_secure"
-
 # Procesar retorno de Google OAuth
 params = st.query_params
 if "code" in params and supabase:
     try:
         code = params["code"]
-        # Intercambiar código enviando la verificación PKCE
-        res_auth = supabase.auth.exchange_code_for_session({
-            "auth_code": code,
-            "code_verifier": PKCE_VERIFIER
-        })
+        # Recuperar el verificador dinámico traído en el parámetro 'cv'
+        code_verifier = params.get("cv") or st.session_state.get("code_verifier") or getattr(supabase.auth, "_code_verifier", None)
+        
+        auth_payload = {"auth_code": code}
+        if code_verifier:
+            auth_payload["code_verifier"] = code_verifier
+
+        res_auth = supabase.auth.exchange_code_for_session(auth_payload)
         
         if res_auth.user:
             email_google = res_auth.user.email.lower()
-            # Buscar si el usuario ya existe en la base de datos
+            # Buscar si el usuario ya existe en la tabla de Supabase
             existente = supabase.table("usuarios").select("*").eq("email", email_google).execute()
             
             if existente.data:
                 st.session_state["usuario"] = existente.data[0]
             else:
-                # Crear nuevo usuario registrado con Google (con 3 anuncios gratis)
+                # Crear nuevo usuario registrado con Google
                 nuevo_user = {
                     "email": email_google,
                     "password": "oauth_google_login",
@@ -108,28 +109,12 @@ if "code" in params and supabase:
             st.query_params.clear()
             st.rerun()
     except Exception as err:
-        # Si falló la validación por PKCE, intentar obtener sesión previa activa
-        try:
-            sess = supabase.auth.get_session()
-            if sess and sess.user:
-                email_google = sess.user.email.lower()
-                existente = supabase.table("usuarios").select("*").eq("email", email_google).execute()
-                if existente.data:
-                    st.session_state["usuario"] = existente.data[0]
-                    st.query_params.clear()
-                    st.rerun()
-        except Exception:
-            pass
         st.error(f"Error al procesar el inicio con Google: {err}")
 
-# Generar URL de autenticación con Google
+# Generar URL de autenticación con Google inyectando la llave en la redirección
 google_login_url = None
 if supabase:
     try:
-        # Inyectar el verificador en la instancia del cliente
-        if hasattr(supabase.auth, "_code_verifier"):
-            supabase.auth._code_verifier = PKCE_VERIFIER
-            
         app_redirect_url = st.secrets.get("APP_URL", "https://share.streamlit.io")
         res_oauth = supabase.auth.sign_in_with_oauth({
             "provider": "google",
@@ -137,7 +122,26 @@ if supabase:
                 "redirect_to": app_redirect_url
             }
         })
-        google_login_url = res_oauth.url
+        
+        raw_url = res_oauth.url
+        real_verifier = getattr(supabase.auth, "_code_verifier", None)
+        
+        if real_verifier:
+            st.session_state["code_verifier"] = real_verifier
+            # Inyectar la llave dinámicamente en el enlace de retorno
+            parsed = urlparse(raw_url)
+            qd = parse_qs(parsed.query)
+            if 'redirect_to' in qd:
+                orig_redirect = qd['redirect_to'][0]
+                sep = "&" if "?" in orig_redirect else "?"
+                new_redirect = f"{orig_redirect}{sep}cv={real_verifier}"
+                qd['redirect_to'] = [new_redirect]
+                new_query = urlencode(qd, doseq=True)
+                google_login_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
+            else:
+                google_login_url = raw_url
+        else:
+            google_login_url = raw_url
     except Exception:
         google_login_url = None
 
@@ -407,9 +411,6 @@ else:
                         break
                     except Exception:
                         continue
-            
-            if not exito:
-                st.error("❌ No se pudo conectar con los servidores de Google. Inténtalo de nuevo.")
             
             if not exito:
                 st.error("❌ No se pudo conectar con los servidores de Google. Inténtalo de nuevo.")
