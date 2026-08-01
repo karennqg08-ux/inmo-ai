@@ -1,3 +1,6 @@
+import hashlib
+import base64
+from urllib.parse import urlencode
 import streamlit as st
 import google.generativeai as genai
 from supabase import create_client, Client
@@ -41,7 +44,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 2. CONEXIÓN CON SUPABASE Y PARCHE ESTÁTICO DE PKCE
+# 2. CONEXIÓN CON SUPABASE Y GEMINI API
 # ---------------------------------------------------------
 raw_key = st.secrets.get("GEMINI_API_KEY", "")
 api_key = raw_key.strip().strip('"').strip("'")
@@ -49,30 +52,10 @@ api_key = raw_key.strip().strip('"').strip("'")
 supabase_url = st.secrets.get("SUPABASE_URL", "").strip().rstrip('/')
 supabase_key = st.secrets.get("SUPABASE_KEY", "").strip().strip('"').strip("'")
 
-# Clave estática de verificación para evitar desfasamiento en Streamlit
-FIXED_PKCE_VERIFIER = "InmoAIStudioPKCECodeVerifierKey2026SecureConstantStringForStreamlit123456"
-
-# Forzar el verificador en los módulos internos de gotrue si están cargados
-try:
-    import gotrue.helpers
-    gotrue.helpers.generate_code_verifier = lambda *args, **kwargs: FIXED_PKCE_VERIFIER
-except Exception:
-    pass
-
-try:
-    import gotrue._sync.gotrue_client
-    gotrue._sync.gotrue_client.generate_code_verifier = lambda *args, **kwargs: FIXED_PKCE_VERIFIER
-except Exception:
-    pass
-
 supabase: Client = None
 if supabase_url and supabase_key:
     try:
         supabase = create_client(supabase_url, supabase_key)
-        # Inyectar la clave directamente en la instancia activa del cliente
-        supabase.auth._code_verifier = FIXED_PKCE_VERIFIER
-        if hasattr(supabase.auth, "_generate_code_verifier"):
-            supabase.auth._generate_code_verifier = lambda *args, **kwargs: FIXED_PKCE_VERIFIER
     except Exception as e:
         st.error(f"Error al inicializar cliente de Supabase: {e}")
 
@@ -87,17 +70,25 @@ if api_key:
         st.error(f"Error al conectar con Google AI: {e}")
 
 # ---------------------------------------------------------
-# 3. GESTIÓN DE SESIÓN DE USUARIO & OAUTH
+# 3. CONSTRUCCIÓN DE LLAVE DE SEGURIDAD PKCE (OAUTH)
 # ---------------------------------------------------------
+FIXED_PKCE_VERIFIER = "InmoAIStudioPKCECodeVerifierKey2026SecureConstantStringForStreamlit123456"
+
+def get_pkce_challenge(verifier: str) -> str:
+    digest = hashlib.sha256(verifier.encode('ascii')).digest()
+    return base64.urlsafe_b64encode(digest).decode('ascii').rstrip('=')
+
+FIXED_PKCE_CHALLENGE = get_pkce_challenge(FIXED_PKCE_VERIFIER)
+
 if "usuario" not in st.session_state:
     st.session_state["usuario"] = None
 
-# Procesar retorno de Google OAuth
+# Procesar retorno desde Google OAuth
 params = st.query_params
 if "code" in params and supabase:
     code = params["code"]
     try:
-        # Intercambiar código forzando la clave constante de verificación
+        # Intercambiar código de autorización usando el verificador PKCE manual
         res_auth = supabase.auth.exchange_code_for_session({
             "auth_code": code,
             "code_verifier": FIXED_PKCE_VERIFIER
@@ -122,38 +113,21 @@ if "code" in params and supabase:
             
             st.query_params.clear()
             st.rerun()
-    except Exception as err:
-        # Limpiar los parámetros de la URL para evitar bucles con códigos expirados
-        st.query_params.clear()
-        
-        # Verificar si la sesión ya había sido iniciada
-        try:
-            sess = supabase.auth.get_session()
-            if sess and sess.user:
-                email_google = sess.user.email.lower()
-                existente = supabase.table("usuarios").select("*").eq("email", email_google).execute()
-                if existente.data:
-                    st.session_state["usuario"] = existente.data[0]
-                    st.rerun()
-        except Exception:
-            pass
-        
-        st.warning("El enlace de inicio caducó o ya fue utilizado. Por favor, haz clic de nuevo en 'Continuar con Google'.")
-
-# Generar URL de autenticación con Google
-google_login_url = None
-if supabase:
-    try:
-        app_redirect_url = st.secrets.get("APP_URL", "https://share.streamlit.io")
-        res_oauth = supabase.auth.sign_in_with_oauth({
-            "provider": "google",
-            "options": {
-                "redirect_to": app_redirect_url
-            }
-        })
-        google_login_url = res_oauth.url
     except Exception:
-        google_login_url = None
+        st.query_params.clear()
+        st.error("Ocurrió un inconveniente al validar la sesión. Por favor, haz clic en 'Continuar con Google' para ingresar.")
+
+# Generar enlace de autenticación directo con parámetro PKCE manual
+google_login_url = None
+if supabase_url:
+    app_redirect_url = st.secrets.get("APP_URL", "https://share.streamlit.io").strip().rstrip('/')
+    oauth_params = {
+        "provider": "google",
+        "redirect_to": app_redirect_url,
+        "code_challenge": FIXED_PKCE_CHALLENGE,
+        "code_challenge_method": "s256"
+    }
+    google_login_url = f"{supabase_url}/auth/v1/authorize?{urlencode(oauth_params)}"
 
 # ---------------------------------------------------------
 # 4. PANTALLA DE INICIO DE SESIÓN / REGISTRO
